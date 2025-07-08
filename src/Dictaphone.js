@@ -18,6 +18,8 @@ const Dictaphone = () => {
   const [audioUrl, setAudioUrl] = useState(null);
   const [recording, setRecording] = useState(false);
   const [audioFiles, setAudioFiles] = useState([]); // 여러 파일 저장
+  const [serverAudioFiles, setServerAudioFiles] = useState([]); // 서버에서 받은 파일들
+  const [uploading, setUploading] = useState(false); // 업로드 상태
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -90,18 +92,66 @@ const Dictaphone = () => {
   // 모두 서버로 전송
   const handleUploadAll = async () => {
     if (audioFiles.length === 0) return;
-    const formData = new FormData();
-    audioFiles.forEach((file, idx) => {
-      formData.append("audios", file.blob, file.filename);
-    });
-    // 실제 서버 주소로 변경 필요
-    await fetch("http://localhost:3000/upload/audios", {
-      method: "POST",
-      body: formData,
-    });
-    alert("모든 파일을 서버로 전송했습니다 (가상)");
-    // 전송 후 파일 목록 초기화 (원하지 않으면 주석처리)
-    setAudioFiles([]);
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      audioFiles.forEach((file, idx) => {
+        formData.append("audios", file.blob, file.filename);
+      });
+
+      console.log("📤 서버로 전송 시작:", {
+        파일개수: audioFiles.length,
+        파일명들: audioFiles.map((f) => f.filename),
+      });
+
+      const response = await fetch("http://localhost:3000/upload/audios", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log(" 서버 응답 받음:", result);
+
+      // 서버 응답 처리
+      if (result.success && result.urls && Array.isArray(result.urls)) {
+        console.log("✅ 업로드 성공, URL 개수:", result.urls.length);
+
+        // 받은 URL들을 서버 파일 목록에 추가
+        const newServerFiles = result.urls.map((url, index) => ({
+          url: url,
+          filename: `server_${Date.now()}_${index}.webm`,
+          uploadedAt: new Date().toLocaleString(),
+        }));
+
+        setServerAudioFiles((prev) => [...prev, ...newServerFiles]);
+        console.log("📝 서버 파일 목록에 추가됨:", newServerFiles);
+      } else {
+        console.warn("⚠️ 서버 응답 형식이 예상과 다름:", result);
+      }
+
+      alert(
+        result.message ||
+          `성공적으로 ${audioFiles.length}개 파일을 서버로 전송했습니다!`
+      );
+      setAudioFiles([]);
+      console.log(" 업로드 완료, 로컬 파일 목록 초기화됨");
+    } catch (error) {
+      console.error("❌ 업로드 중 오류 발생:", error);
+      alert(`업로드 실패: ${error.message}`);
+    } finally {
+      setUploading(false);
+      console.log("🏁 업로드 프로세스 종료");
+    }
+  };
+
+  // 서버 파일 삭제
+  const handleDeleteServerFile = (idx) => {
+    setServerAudioFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   return (
@@ -218,19 +268,77 @@ const Dictaphone = () => {
           </ul>
           <button
             onClick={handleUploadAll}
+            disabled={uploading}
             style={{
               marginTop: 10,
               padding: "10px 20px",
-              background: "#673ab7",
+              background: uploading ? "#ccc" : "#673ab7",
               color: "#fff",
               border: "none",
               borderRadius: 5,
               fontWeight: "bold",
-              cursor: "pointer",
+              cursor: uploading ? "not-allowed" : "pointer",
             }}
           >
-            모두 서버로 전송
+            {uploading ? "전송 중..." : "모두 서버로 전송"}
           </button>
+        </div>
+      )}
+
+      {/* 서버에서 받은 파일 목록 */}
+      {serverAudioFiles.length > 0 && (
+        <div
+          style={{
+            margin: "20px 0",
+            textAlign: "left",
+            maxWidth: 600,
+            marginLeft: "auto",
+            marginRight: "auto",
+          }}
+        >
+          <h3>서버에 저장된 파일들</h3>
+          <ul style={{ listStyle: "none", padding: 0 }}>
+            {serverAudioFiles.map((file, idx) => (
+              <li
+                key={file.url}
+                style={{
+                  marginBottom: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 5,
+                  padding: 10,
+                  background: "#f0f8ff",
+                }}
+              >
+                <div style={{ marginBottom: 5 }}>
+                  <span style={{ fontWeight: "bold" }}>{file.filename}</span>
+                  <span
+                    style={{ fontSize: "12px", color: "#666", marginLeft: 10 }}
+                  >
+                    {file.uploadedAt}
+                  </span>
+                </div>
+                <audio
+                  src={file.url}
+                  controls
+                  style={{ margin: "0 10px", verticalAlign: "middle" }}
+                />
+                <button
+                  onClick={() => handleDeleteServerFile(idx)}
+                  style={{
+                    color: "#fff",
+                    background: "#f44336",
+                    border: "none",
+                    borderRadius: 3,
+                    padding: "5px 10px",
+                    cursor: "pointer",
+                    marginLeft: 10,
+                  }}
+                >
+                  목록에서 삭제
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
