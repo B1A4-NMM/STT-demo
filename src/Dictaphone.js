@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useState } from "react";
 import SpeechRecognition, {
   useSpeechRecognition,
 } from "react-speech-recognition";
@@ -14,6 +14,12 @@ const Dictaphone = () => {
     continuous: true,
     interimResults: true,
   });
+
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [audioFiles, setAudioFiles] = useState([]); // 여러 파일 저장
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   if (!browserSupportsSpeechRecognition) {
     return (
@@ -36,10 +42,66 @@ const Dictaphone = () => {
       continuous: true,
       language: "ko-KR",
     });
+    // Start MediaRecorder
+    if (navigator.mediaDevices && window.MediaRecorder) {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        const mediaRecorder = new window.MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, {
+            type: "audio/webm",
+          });
+          const url = URL.createObjectURL(audioBlob);
+          setAudioUrl(url);
+          // 파일명: 녹음 시각 기준
+          const filename = `recording_${new Date()
+            .toISOString()
+            .replace(/[:.]/g, "-")}.webm`;
+          setAudioFiles((prev) => [
+            ...prev,
+            { blob: audioBlob, url, filename },
+          ]);
+        };
+        mediaRecorder.start();
+        setRecording(true);
+      });
+    }
   };
 
   const stopListening = () => {
     SpeechRecognition.stopListening();
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+    }
+  };
+
+  // 파일 삭제
+  const handleDelete = (idx) => {
+    setAudioFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  // 모두 서버로 전송
+  const handleUploadAll = async () => {
+    if (audioFiles.length === 0) return;
+    const formData = new FormData();
+    audioFiles.forEach((file, idx) => {
+      formData.append("audios", file.blob, file.filename);
+    });
+    // 실제 서버 주소로 변경 필요
+    await fetch("http://localhost:3000/upload/audios", {
+      method: "POST",
+      body: formData,
+    });
+    alert("모든 파일을 서버로 전송했습니다 (가상)");
+    // 전송 후 파일 목록 초기화 (원하지 않으면 주석처리)
+    setAudioFiles([]);
   };
 
   return (
@@ -54,32 +116,32 @@ const Dictaphone = () => {
       <div style={{ margin: "20px 0" }}>
         <button
           onClick={startListening}
-          disabled={listening}
+          disabled={listening || recording}
           style={{
             padding: "10px 20px",
             margin: "0 10px",
             fontSize: "16px",
-            backgroundColor: listening ? "#ccc" : "#4CAF50",
+            backgroundColor: listening || recording ? "#ccc" : "#4CAF50",
             color: "white",
             border: "none",
             borderRadius: "5px",
-            cursor: listening ? "not-allowed" : "pointer",
+            cursor: listening || recording ? "not-allowed" : "pointer",
           }}
         >
           녹음 시작
         </button>
         <button
           onClick={stopListening}
-          disabled={!listening}
+          disabled={!listening && !recording}
           style={{
             padding: "10px 20px",
             margin: "0 10px",
             fontSize: "16px",
-            backgroundColor: !listening ? "#ccc" : "#f44336",
+            backgroundColor: !listening && !recording ? "#ccc" : "#f44336",
             color: "white",
             border: "none",
             borderRadius: "5px",
-            cursor: !listening ? "not-allowed" : "pointer",
+            cursor: !listening && !recording ? "not-allowed" : "pointer",
           }}
         >
           녹음 정지
@@ -100,6 +162,77 @@ const Dictaphone = () => {
           텍스트 초기화
         </button>
       </div>
+
+      {/* 여러 녹음 파일 목록 */}
+      {audioFiles.length > 0 && (
+        <div
+          style={{
+            margin: "20px 0",
+            textAlign: "left",
+            maxWidth: 600,
+            marginLeft: "auto",
+            marginRight: "auto",
+          }}
+        >
+          <h3>녹음 파일 목록</h3>
+          <ul style={{ listStyle: "none", padding: 0 }}>
+            {audioFiles.map((file, idx) => (
+              <li
+                key={file.url}
+                style={{
+                  marginBottom: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 5,
+                  padding: 10,
+                  background: "#fafafa",
+                }}
+              >
+                <span style={{ fontWeight: "bold" }}>{file.filename}</span>
+                <audio
+                  src={file.url}
+                  controls
+                  style={{ margin: "0 10px", verticalAlign: "middle" }}
+                />
+                <a
+                  href={file.url}
+                  download={file.filename}
+                  style={{ marginRight: 10 }}
+                >
+                  다운로드
+                </a>
+                <button
+                  onClick={() => handleDelete(idx)}
+                  style={{
+                    color: "#fff",
+                    background: "#f44336",
+                    border: "none",
+                    borderRadius: 3,
+                    padding: "5px 10px",
+                    cursor: "pointer",
+                  }}
+                >
+                  삭제
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={handleUploadAll}
+            style={{
+              marginTop: 10,
+              padding: "10px 20px",
+              background: "#673ab7",
+              color: "#fff",
+              border: "none",
+              borderRadius: 5,
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            모두 서버로 전송
+          </button>
+        </div>
+      )}
 
       <div
         style={{
